@@ -1,13 +1,143 @@
 import curses
+import os
 import random
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Set
 from enum import Enum
 import sys
 import pyfiglet
+import pygame
 
 MAIN_FIGLET_FONT = 'larry3d'
 PYFIGLET_FONT = 'slant'
+
+
+class SoundEffects:
+    def __init__(self):
+        # First, try to quit any existing pygame instance
+        try:
+            pygame.mixer.quit()
+            pygame.quit()
+        except:
+            pass
+
+        # Wait a moment to ensure cleanup
+        import time
+        time.sleep(0.1)
+
+        # Initialize pygame itself first
+        pygame.init()
+
+        # Initialize pygame mixer with good audio quality
+        try:
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+        except Exception as e:
+            print(f"Warning: Could not initialize sound system: {e}")
+            self.sound_enabled = False
+            return
+
+        self.sound_enabled = True
+
+        # Create channel for effects
+        pygame.mixer.set_num_channels(1)
+        self.effect_channel = pygame.mixer.Channel(0)
+
+        # Define sound file paths relative to main.py
+        sound_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds')
+        self.soundtrack_path = os.path.join(sound_dir, 'soundtrack.wav')
+
+        # Load sound effects
+        try:
+            self.card_flip = self._load_sound(os.path.join(sound_dir, 'card_flip.wav'))
+            self.card_place = self._load_sound(os.path.join(sound_dir, 'card_place.wav'))
+            self.foundation_complete = self._load_sound(os.path.join(sound_dir, 'foundation_complete.wav'))
+            self.game_win = self._load_sound(os.path.join(sound_dir, 'game_win.wav'))
+            self.game_over = self._load_sound(os.path.join(sound_dir, 'game_over.wav'))
+            self.error = self._load_sound(os.path.join(sound_dir, 'error.wav'))
+
+            # Set volumes
+            if self.card_flip: self.card_flip.set_volume(0.3)
+            if self.card_place: self.card_place.set_volume(0.3)
+            if self.foundation_complete: self.foundation_complete.set_volume(0.4)
+            if self.game_win: self.game_win.set_volume(0.4)
+            if self.game_over: self.game_over.set_volume(0.4)
+            if self.error: self.error.set_volume(0.2)
+
+        except Exception as e:
+            print(f"Warning: Could not load sound files: {e}")
+            self.sound_enabled = False
+
+    def _load_sound(self, path):
+        """Helper method to load a sound file with error handling"""
+        try:
+            if not os.path.exists(path):
+                print(f"Warning: Sound file not found: {path}")
+                return None
+            return pygame.mixer.Sound(path)
+        except Exception as e:
+            print(f"Warning: Could not load sound file {path}: {e}")
+            return None
+
+    def play_sound(self, sound):
+        """Play a sound effect if sound system is enabled and sound exists"""
+        if self.sound_enabled and sound:
+            try:
+                self.effect_channel.play(sound)
+            except Exception as e:
+                print(f"Warning: Could not play sound: {e}")
+
+    def start_music(self):
+        """Start playing background music in a loop"""
+        if self.sound_enabled and os.path.exists(self.soundtrack_path):
+            try:
+                pygame.mixer.music.load(self.soundtrack_path)
+                pygame.mixer.music.set_volume(0.2)  # Set music volume
+                pygame.mixer.music.play(-1, fade_ms=1000)  # -1 means loop indefinitely
+            except Exception as e:
+                print(f"Warning: Could not start music: {e}")
+
+    def stop_music(self):
+        """Stop background music"""
+        if self.sound_enabled:
+            try:
+                pygame.mixer.music.fadeout(1000)
+            except Exception as e:
+                print(f"Warning: Could not stop music: {e}")
+
+    def set_music_volume(self, volume):
+        """Set music volume (0.0 to 1.0)"""
+        if self.sound_enabled:
+            try:
+                pygame.mixer.music.set_volume(volume)
+            except Exception as e:
+                print(f"Warning: Could not set music volume: {e}")
+
+    def play_card_flip(self):
+        self.play_sound(self.card_flip)
+
+    def play_card_place(self):
+        self.play_sound(self.card_place)
+
+    def play_foundation_complete(self):
+        self.play_sound(self.foundation_complete)
+
+    def play_game_win(self):
+        self.play_sound(self.game_win)
+
+    def play_game_over(self):
+        self.play_sound(self.game_over)
+
+    def play_error(self):
+        self.play_sound(self.error)
+
+    def __del__(self):
+        """Cleanup when the object is destroyed"""
+        try:
+            pygame.mixer.quit()
+            pygame.quit()
+        except:
+            pass
+
 
 class Suit(Enum):
     HEARTS = '♥'
@@ -61,6 +191,7 @@ class Card:
 
     def __repr__(self) -> str:
         return str(self)
+
 
 class SolutionMove:
     def __init__(self, card: Card, source_type: str, source_idx: int,
@@ -153,6 +284,8 @@ class VegasSolitaire:
         self.message = ""
 
         self._setup_colors()
+        self.sounds = SoundEffects()
+
 
     """-----SETUP-----"""
 
@@ -175,12 +308,12 @@ class VegasSolitaire:
 
     def new_game(self):
         self._setup_colors()
-
         self.bank -= 52
         self.tableau, self.foundation, self.stock, self.solution_path = \
             self.generator.generate_solvable_game()
         self.waste = []
         self.selected = None
+        self.sounds.start_music()  # Start background music
         return True
 
     def _center_text(self, text, width, pad_char=" "):
@@ -256,6 +389,7 @@ class VegasSolitaire:
                 return False
 
     def _show_game_over_screen(self, won=False):
+        self.sounds.stop_music()
         """Display game over screen with final score"""
         BOX_WIDTH = 50
         while True:
@@ -310,8 +444,11 @@ class VegasSolitaire:
         if not self._show_main_menu():
             return
 
+        self.sounds.start_music()  # Start music when game starts
+
         while True:
             if not self.new_game():
+                self.sounds.stop_music()  # Stop music if quitting
                 return
 
             game_running = True
@@ -348,30 +485,62 @@ class VegasSolitaire:
             self.screen.clear()
             max_y, max_x = self.screen.getmaxyx()
 
+            # Fixed card dimensions and spacing
+            CARD_WIDTH = 6  # [A♠]
+            MIN_SPACING = 2  # Minimum space between cards
+            MAX_SPACING = 3  # Maximum space between cards
+            TOTAL_COLUMNS = 7
+
+            # Calculate maximum tableau height (for vertical centering)
+            max_tableau_height = max(len(pile) for pile in self.tableau)
+            total_height = max_tableau_height + 7  # 5 for top area, 2 for padding
+
+            # Calculate vertical centering
+            top_margin = max(0, (max_y - total_height) // 2)
+
+            # Calculate the ideal game width
+            ideal_game_width = (CARD_WIDTH * TOTAL_COLUMNS) + (MIN_SPACING * (TOTAL_COLUMNS - 1))
+            max_game_width = (CARD_WIDTH * TOTAL_COLUMNS) + (MAX_SPACING * (TOTAL_COLUMNS - 1))
+
+            # Calculate horizontal centering
+            left_margin = max(2, (max_x - max_game_width) // 2)
+
+            # Calculate column positions with controlled spacing
+            column_x = []
+            spacing = min(MAX_SPACING, max(MIN_SPACING,
+                                           (max_x - (2 * left_margin) - (TOTAL_COLUMNS * CARD_WIDTH)) // (
+                                                   TOTAL_COLUMNS - 1)))
+
+            current_x = left_margin
+            for i in range(TOTAL_COLUMNS):
+                column_x.append(current_x)
+                current_x += CARD_WIDTH + spacing
+
             # Draw header
+            header_y = top_margin
             header = f"Bank: ${self.bank}   [Q:Quit, N:New Game, H:Hint(-5$)]"
-            self.screen.addstr(0, 0, header[:max_x - 1], curses.color_pair(2))
+            self.screen.addstr(header_y, left_margin, header[:max_x - left_margin], curses.color_pair(2))
 
             if self.message:
-                self.screen.addstr(1, 0, self.message[:max_x - 1], curses.color_pair(3))
+                self.screen.addstr(header_y + 1, left_margin, self.message[:max_x - left_margin], curses.color_pair(3))
 
             # Draw stock and waste piles
-            y = 3
-            if y < max_y:
+            stock_y = header_y + 3
+            if stock_y < max_y:
                 # Stock
                 stock_str = "[##]" if self.stock else "[  ]"
                 if self.cursor['y'] == 0 and self.cursor['x'] == 0:
-                    self.screen.addstr(y, 0, stock_str, curses.A_REVERSE)
+                    self.screen.addstr(stock_y, column_x[0], stock_str, curses.A_REVERSE)
                 else:
-                    self.screen.addstr(y, 0, stock_str)
+                    self.screen.addstr(stock_y, column_x[0], stock_str)
 
-                # Draw waste (last 3 cards)
-                waste_x = 6
-                if self.waste and waste_x + 9 < max_x:  # Ensure space for 3 cards
+                # Draw waste
+                waste_x = column_x[0] + CARD_WIDTH + 2
+                if self.waste and waste_x + (3 * CARD_WIDTH) < max_x:
                     visible_waste = self.waste[-3:] if len(self.waste) >= 3 else self.waste
                     for idx, card in enumerate(visible_waste):
                         waste_str = str(card)
-                        display_x = waste_x + idx * 3
+                        display_x = waste_x + (idx * 3)  # Overlapped waste cards
 
                         if display_x + len(waste_str) < max_x:
                             is_selected = (self.cursor['y'] == 0 and
@@ -379,60 +548,59 @@ class VegasSolitaire:
                                            idx == len(visible_waste) - 1)
 
                             if is_selected:
-                                self.screen.addstr(y, display_x, waste_str, curses.A_REVERSE)
+                                self.screen.addstr(stock_y, display_x, waste_str, curses.A_REVERSE)
                             else:
                                 if card.suit.color == 'red':
-                                    self.screen.addstr(y, display_x, waste_str, curses.color_pair(1))
+                                    self.screen.addstr(stock_y, display_x, waste_str, curses.color_pair(1))
                                 else:
-                                    self.screen.addstr(y, display_x, waste_str)
+                                    self.screen.addstr(stock_y, display_x, waste_str)
                 elif waste_x < max_x:
-                    self.screen.addstr(y, waste_x, "[  ]")
+                    self.screen.addstr(stock_y, waste_x, "[  ]")
 
-                # Draw foundations
-                foundation_x = 18
+                # Draw foundations - centered in remaining space
+                foundation_start = column_x[3]  # Start from middle column
+                foundation_spacing = min(MAX_SPACING, CARD_WIDTH)
                 for i in range(4):
-                    x = foundation_x + i * 6
-                    if x + 5 < max_x:
+                    x = foundation_start + (i * (CARD_WIDTH + foundation_spacing))
+                    if x + CARD_WIDTH < max_x:
                         if i < len(self.foundation):
                             if self.foundation[i]:
                                 card_str = str(self.foundation[i][-1])
                                 if self.cursor['y'] == 0 and self.cursor['x'] == i + 2:
-                                    self.screen.addstr(y, x, card_str, curses.A_REVERSE)
+                                    self.screen.addstr(stock_y, x, card_str, curses.A_REVERSE)
                                 else:
                                     if self.foundation[i][-1].suit.color == 'red':
-                                        self.screen.addstr(y, x, card_str, curses.color_pair(1))
+                                        self.screen.addstr(stock_y, x, card_str, curses.color_pair(1))
                                     else:
-                                        self.screen.addstr(y, x, card_str)
+                                        self.screen.addstr(stock_y, x, card_str)
                             else:
                                 empty_str = "[  ]"
                                 if self.cursor['y'] == 0 and self.cursor['x'] == i + 2:
-                                    self.screen.addstr(y, x, empty_str, curses.A_REVERSE)
+                                    self.screen.addstr(stock_y, x, empty_str, curses.A_REVERSE)
                                 else:
-                                    self.screen.addstr(y, x, empty_str)
+                                    self.screen.addstr(stock_y, x, empty_str)
 
             # Draw tableau
-            for i in range(7):
-                x = i * 6
-                if x + 5 >= max_x:
+            tableau_y = stock_y + 2
+            for i in range(TOTAL_COLUMNS):
+                x = column_x[i]
+                if x + CARD_WIDTH >= max_x:
                     break
 
-                # Draw empty tableau slot indicator
-                if y + 2 < max_y:
+                if tableau_y < max_y:
                     if not self.tableau[i]:
                         empty_slot = "[   ]"
                         if self.cursor['y'] == 1 and self.cursor['x'] == i:
-                            self.screen.addstr(5, x, empty_slot, curses.A_REVERSE)
+                            self.screen.addstr(tableau_y, x, empty_slot, curses.A_REVERSE)
                         else:
-                            self.screen.addstr(5, x, empty_slot, curses.color_pair(2))
+                            self.screen.addstr(tableau_y, x, empty_slot, curses.color_pair(2))
 
-                    # Draw cards
                     for j, card in enumerate(self.tableau[i]):
-                        y = 5 + j
+                        y = tableau_y + j
                         if y >= max_y:
                             break
 
                         card_str = str(card)
-
                         attrs = curses.A_NORMAL
                         if self.cursor['y'] == j + 1 and self.cursor['x'] == i:
                             attrs = curses.A_REVERSE
@@ -445,24 +613,63 @@ class VegasSolitaire:
                         else:
                             self.screen.addstr(y, x, card_str, attrs)
 
-            # Draw debug information if enabled
+            # Debug info with adjusted position
             if self.debug_mode:
                 debug_start_y = max_y - 12
-                if debug_start_y > y + 2:
-                    self.screen.addstr(debug_start_y, 0, "=== DEBUG INFO ===", curses.color_pair(3))
-                    self.screen.addstr(debug_start_y + 1, 0, f"Cursor: {self.cursor}")
-                    self.screen.addstr(debug_start_y + 2, 0, f"Selected: {self.selected}")
+                if debug_start_y > tableau_y + max_tableau_height + 2:
+                    self.screen.addstr(debug_start_y, left_margin, "=== DEBUG INFO ===", curses.color_pair(3))
+                    self.screen.addstr(debug_start_y + 1, left_margin, f"Cursor: {self.cursor}")
+                    self.screen.addstr(debug_start_y + 2, left_margin, f"Selected: {self.selected}")
+                    self.screen.addstr(debug_start_y + 3, left_margin, f"Screen: {max_y}x{max_x}")
 
                     moves = self._get_possible_moves()
                     if moves:
-                        self.screen.addstr(debug_start_y + 3, 0, "Possible moves:")
+                        self.screen.addstr(debug_start_y + 4, left_margin, "Possible moves:")
                         for i, move in enumerate(moves):
-                            if debug_start_y + 4 + i < max_y:
-                                self.screen.addstr(debug_start_y + 4 + i, 2, move[:max_x - 3])
+                            if debug_start_y + 5 + i < max_y:
+                                self.screen.addstr(debug_start_y + 5 + i, left_margin + 2,
+                                                   move[:max_x - left_margin - 3])
 
             self.screen.refresh()
         except Exception as e:
             self._debug_print(f"Draw error: {str(e)}")
+
+    def _find_next_valid_position(self, current_x, current_y, direction):
+        """Find next valid cursor position, returns (x, y)"""
+        if current_y == 0:  # Top row
+            # Define valid positions in top row: stock, waste, foundations
+            valid_x = [0]  # Stock always valid
+            if self.waste:  # Waste if not empty
+                valid_x.append(1)
+            # Add foundation positions
+            valid_x.extend([i + 2 for i in range(4)])
+
+            # Find next valid x
+            if direction > 0:  # Moving right
+                next_positions = [x for x in valid_x if x > current_x]
+                return min(next_positions) if next_positions else current_x, current_y
+            else:  # Moving left
+                next_positions = [x for x in valid_x if x < current_x]
+                return max(next_positions) if next_positions else current_x, current_y
+
+        else:  # Tableau rows
+            if current_y == 1:  # First tableau row
+                # Only consider columns that have cards or are empty (valid for placement)
+                valid_x = [i for i in range(7) if self.tableau[i] or
+                           (self.selected and self._can_move_to_tableau(self._get_selected_cards()[0], i))]
+            else:
+                # Only consider columns that have cards at this row
+                valid_x = [i for i in range(7) if len(self.tableau[i]) >= current_y]
+
+            if not valid_x:  # No valid positions found
+                return current_x, current_y
+
+            if direction > 0:  # Moving right
+                next_positions = [x for x in valid_x if x > current_x]
+                return min(next_positions) if next_positions else current_x, current_y
+            else:  # Moving left
+                next_positions = [x for x in valid_x if x < current_x]
+                return max(next_positions) if next_positions else current_x, current_y
 
     def _handle_input(self):
         try:
@@ -485,23 +692,33 @@ class VegasSolitaire:
 
             # Handle movement with bounds checking
             if key == curses.KEY_UP and self.cursor['y'] > 0:
+                if self.cursor['y'] == 1:  # Moving from tableau to top row
+                    # Map tableau columns to top row elements
+                    if self.cursor['x'] <= 1:  # First two columns go to stock/waste
+                        self.cursor['x'] = min(self.cursor['x'], 1)
+                    else:  # Other columns map to foundations
+                        self.cursor['x'] = min(self.cursor['x'] - 1, 5)
                 self.cursor['y'] -= 1
             elif key == curses.KEY_DOWN:
                 max_y = max(len(pile) for pile in self.tableau)
                 if self.cursor['y'] == 0:  # Moving from top row
+                    # Map top row elements to tableau columns
+                    if self.cursor['x'] <= 1:  # Stock/waste go to first two columns
+                        self.cursor['x'] = min(self.cursor['x'], 1)
+                    else:  # Foundations map to tableau columns
+                        self.cursor['x'] = min(self.cursor['x'] + 1, 6)
                     if self._is_valid_position(self.cursor['x'], 1):
                         self.cursor['y'] = 1
                 else:
                     new_y = min(self.cursor['y'] + 1, max_y + 1)
                     if self._is_valid_position(self.cursor['x'], new_y):
                         self.cursor['y'] = new_y
-            elif key == curses.KEY_LEFT and self.cursor['x'] > 0:
-                self.cursor['x'] -= 1
+            elif key == curses.KEY_LEFT:
+                new_x, new_y = self._find_next_valid_position(self.cursor['x'], self.cursor['y'], -1)
+                self.cursor['x'], self.cursor['y'] = new_x, new_y
             elif key == curses.KEY_RIGHT:
-                if self.cursor['y'] == 0:
-                    self.cursor['x'] = min(self.cursor['x'] + 1, 5)
-                else:
-                    self.cursor['x'] = min(self.cursor['x'] + 1, 6)
+                new_x, new_y = self._find_next_valid_position(self.cursor['x'], self.cursor['y'], 1)
+                self.cursor['x'], self.cursor['y'] = new_x, new_y
             elif key == ord(' '):
                 try:
                     if not self._handle_selection():
@@ -510,10 +727,6 @@ class VegasSolitaire:
                         self.selected = None  # Reset selection on invalid move
                 except Exception as e:
                     self._debug_print(f"Selection error: {str(e)}")
-
-            # Ensure cursor stays within valid bounds
-            self.cursor['x'] = max(0, min(self.cursor['x'], 6))
-            self.cursor['y'] = max(0, min(self.cursor['y'], max(len(pile) for pile in self.tableau) + 1))
 
             return True
         except Exception as e:
@@ -600,7 +813,9 @@ class VegasSolitaire:
                 card = self.stock.pop()
                 card.face_up = True
                 self.waste.append(card)
+                self.sounds.play_card_flip()
                 return True
+            self.sounds.play_error()
             return False
 
         # Handle waste pile
@@ -657,6 +872,7 @@ class VegasSolitaire:
     def _try_move_to_foundation(self, foundation_idx) -> bool:
         """Try to move a card to foundation. Returns True if successful."""
         if not self.selected:
+            self.sounds.play_error()
             return False
 
         source_type, source_idx, card_idx = self.selected
@@ -675,14 +891,23 @@ class VegasSolitaire:
                     self.tableau[source_idx][-1].face_up = True
 
             self.foundation[foundation_idx].append(card)
-            self.bank += 5  # $5 for each card in foundation
+            self.bank += 5
             self.selected = None
+
+            if len(self.foundation[foundation_idx]) == 13:
+                self.sounds.play_foundation_complete()
+            else:
+                self.sounds.play_card_place()
+
             return True
+
+        self.sounds.play_error()
         return False
 
     def _try_move_to_tableau(self, tableau_idx) -> bool:
         """Try to move card(s) to tableau. Returns True if successful."""
         if not self.selected:
+            self.sounds.play_error()
             return False
 
         source_type, source_idx, card_idx = self.selected
@@ -703,7 +928,10 @@ class VegasSolitaire:
 
             self.tableau[tableau_idx].extend(cards)
             self.selected = None
+            self.sounds.play_card_place()
             return True
+
+        self.sounds.play_error()
         return False
 
     def _can_move_to_foundation(self, card, foundation_idx):
@@ -747,8 +975,8 @@ class VegasSolitaire:
 
         top_card = tableau[-1]
         result = (top_card.face_up and
-                 card.suit.color != top_card.suit.color and
-                 card.rank.number == top_card.rank.number - 1)
+                  card.suit.color != top_card.suit.color and
+                  card.rank.number == top_card.rank.number - 1)
         self._debug_print(f"Tableau move {card} on {top_card}: {result}")
         return result
 
@@ -757,11 +985,15 @@ class VegasSolitaire:
             bonus = 100
             self.bank += bonus
             self.message = f"You won! Bank: ${self.bank} (Bonus: +${bonus})"
+            self.sounds.play_game_win()
             return True
         return False
 
     def _check_game_over(self):
-        return not self.stock
+        is_game_over = not self.stock
+        if is_game_over:
+            self.sounds.play_game_over()
+        return is_game_over
 
     def _has_valid_moves(self):
         # Check waste to foundation/tableau
@@ -817,6 +1049,7 @@ class VegasSolitaire:
 
         return foundation_moves + reveal_moves + king_moves + other_moves
 
+
 def main(stdscr):
     curses.curs_set(0)  # Hide cursor
     stdscr.keypad(1)  # Enable keypad
@@ -826,4 +1059,13 @@ def main(stdscr):
 
 
 if __name__ == '__main__':
+    # Quick sound test before starting the game
+    sounds = SoundEffects()
+    if sounds.sound_enabled:
+        print("Sound system initialized successfully")
+        sounds.play_card_flip()
+        pygame.time.wait(1000)  # Wait 1 second to hear the sound
+    else:
+        print("Sound system failed to initialize")
+
     curses.wrapper(main)
